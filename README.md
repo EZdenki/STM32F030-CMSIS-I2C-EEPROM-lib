@@ -1,8 +1,8 @@
 # STM32F103-CMSIS-I2C-EEPROM-lib
-STM32F103 (Blue Pill) routines and sample memory monitor program for the 24CL64 I2C EEPROM
+Routines and sample memory monitor program for the 24CL64 I2C EEPROM running on an STM32F030F4 using CMSIS (no HAL).
 ## To clone this library and sample EEPROM memory monitor:
-+ ```git clone http://github.com/sandynomike/STM32-CMSIS-I2C-EEPROM-lib```
-+ ```cd STM32-CMSIS-I2C-EEPROM-lib```
++ ```git clone http://github.com/EZdenki/STM32F030-CMSIS-I2C-EEPROM-lib```
++ ```cd STM32F030-CMSIS-I2C-EEPROM-lib```
 + ```make clean && make```
 ## Routines included in the STM32F104-CMSIS-I2C-EEPROM-lib.c library:
 + void EE24_init( I2C_TypeDef *thisI2C, uint32_t deviceAdd, uint32_t bytes, uint32_t pageSize )<br>
@@ -15,3 +15,5 @@ STM32F103 (Blue Pill) routines and sample memory monitor program for the 24CL64 
 + void EE24_dump( uint32_t address, uint32_t length )<br>
   Perform a memory dump from the EEPROM to the serial port. Note that this routine uses the STM32F103-CMSIS-USART-lib library
   and requires that the USART port be initialized and a serial port be open.
+## Hardware Setup
+  See **main.c** for details on how to connect the EEPROM and USB serial dongle to the STM32F030F4.
