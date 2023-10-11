@@ -7,6 +7,8 @@
 //  Released under the MIT License
 //  Copyright (c) 2023
 //  Mike Shegedin, EZdenki.com
+//    Version 1.3   11 Oct 2023   Had putc wait until character is actually sent before
+//                                returning to the calling routine.
 //    Version 1.2   28 Aug 2023   Ported USART_puti, USART_puth, USART_pollc from
 //                                STM32F103 code.
 //    Version 1.1   16 Aug 2023   Added baud rate as parameter to USART_init
@@ -120,8 +122,11 @@ USART_putc( char c )
     // Wait until the transmit data register is empty
     while( !(USART_USART->ISR & USART_ISR_TXE ) ) ;
     
-    // Put character into the data register.
+    // Put character into the data register
     USART_USART->TDR = c; 
+
+    // Wait until character is actually sent
+    while( !(USART_USART->ISR & USART_ISR_TC) ) ;
 }
 
 
