@@ -2,6 +2,9 @@
 //    Routines to write/fill and read data on the 24CL64 I2C EEPROM IC.
 //    Mike Shegedin (EZdenki.com)
 //
+//        Version 1.2   27 Oct 2023   Updated EE24_read and EE24_write routines to allow for
+//                                    aribtrary read and write lengths past 255-byte limit of
+//                                    I2C on the STM32.
 //        Version 1.1    9 Aug 2023   Updated I2C and Delay libraries
 //        Version 1.0   18 Jul 2023   Updated comments and core files
 //        Started          Jul 2023
@@ -89,30 +92,50 @@ EE24_init( I2C_TypeDef *thisI2C, uint32_t I2CSpeed, uint32_t deviceAdd,
 uint32_t
 EE24_read( uint32_t address, uint8_t *data, uint32_t length)
 {
-  int32_t x;  // Counter
+  #define READ_PAGE_SIZE 255    // Maximum number of reads due to STM32 I2C implemenation
+  int32_t pagesToRead;          // Page counter
+  int32_t bytesToReadNow;       // Number of bytes to read in one read operation
+  int32_t bytesRemaining;       // Number of bytes remaining to read
+  uint32_t writePtr = 0;        // Index to array to hold data
 
   if( (address + length - 1 ) > EE24_BYTES )    // If the address and/or length are too high
     return 1;                                   // then return 1 to indicate that no read
                                                 // operation was performed.
-
-                                                // Address Command Frame:
   I2C_setAddress( EE24_I2C, EE24_ADD );         // Set address of EEPROM
-  I2C_setNBytes( EE24_I2C, 2 );                 // Set number of bytes to write
-  I2C_start( EE24_I2C );                        // Start I2C transaction
-  I2C_write( EE24_I2C, (address >> 8) & 0x1F ); // Send EEPROM memory address upper byte
-  I2C_write( EE24_I2C, address & 0xFF );        // Send lower byte
-  I2C_stop( EE24_I2C );                         // Stop I2C transaction
 
-                                                // Data Read Frame
-  I2C_setNBytes( EE24_I2C, length );            // Set number of bytes to read
-  I2C_setReadMode( EE24_I2C );                  // Turn on Read Mode
-  I2C_start( EE24_I2C );                        // Start I2C transaction
-  for( x = 0; x<length; x++)                    // Loop to read in bytes
-    data[x] = I2C_read( EE24_I2C );             // Read in one byte per iteration
-  I2C_stop( EE24_I2C );                         // Send stop bit
-  I2C_setWriteMode( EE24_I2C );                 // Return to Write Mode (default)
+  // Set the number of read operations (pages to read. This is because I2C on the STM32 can
+  // only handle up to 255 consecutive read operations before starting a new frame.
+  pagesToRead = ( length - 1 ) / READ_PAGE_SIZE + 1;
+  bytesRemaining = length;                      // Running count of bytes to be written
 
-  return 0;                                     // Return zero to indicate that read was okay
+  for( uint32_t x=0; x<pagesToRead; x++ )       // Do once per page, full or partial
+  {
+    if( bytesRemaining>READ_PAGE_SIZE )         // Set current read to the READ_PAGE_SIZE
+      bytesToReadNow = READ_PAGE_SIZE;          // or the remaining number of bytes in case
+    else                                        // of the last page-read.
+      bytesToReadNow = bytesRemaining;
+      
+    I2C_setNBytes( EE24_I2C, 2 );                 // Set number of bytes to write
+    I2C_start( EE24_I2C );                        // Start I2C transaction
+    I2C_write( EE24_I2C, (address >> 8) & 0x1F ); // Send EEPROM memory address upper byte
+    I2C_write( EE24_I2C, address & 0xFF );        // Send lower byte
+    I2C_stop( EE24_I2C );                         // Stop I2C transaction
+    
+    // Data Read Frame
+    I2C_setNBytes( EE24_I2C, bytesToReadNow );    // Set number of bytes to read
+    I2C_setReadMode( EE24_I2C );                  // Turn on Read Mode
+    I2C_start( EE24_I2C );                        // Start I2C transaction
+
+    for( uint32_t y = 0; y<bytesToReadNow; y++)   // Loop to read in bytes
+      data[ writePtr++ ] = I2C_read( EE24_I2C );  // Read in one byte per iteration
+    
+    I2C_stop( EE24_I2C );                         // Send stop bit
+    I2C_setWriteMode( EE24_I2C );                 // Return to Write Mode (default)
+
+    bytesRemaining -= bytesToReadNow;             // Update bytesRemaining
+    address += bytesToReadNow;                    // Update address pointer
+  }
+  return 0;                                       // Return 0 to indicate that read was okay
 }
 
 
@@ -140,14 +163,15 @@ EE24_read( uint32_t address, uint8_t *data, uint32_t length)
 uint32_t
 EE24_write( uint32_t address, uint8_t *data, uint32_t length, uint32_t fill)
 {
-
   uint32_t endAddress;        // Last address to write to
   uint32_t pageStartAddress;  // Starting address for current page
   uint32_t pageEndAddress;    // Ending address for current page
   uint8_t  addHighByte;       // Address High Byte
   uint8_t  addLowByte;        // Address Low Byte
   uint32_t bytesWritten;      // Count of bytes written used for return value.
-  
+  uint32_t writeLength;       // Number of bytes (including address) to write for this frame
+
+USART_puts("\nEntered EE24_write\n");
   if( address >= EE24_BYTES )
     return 1;
  
@@ -163,7 +187,6 @@ EE24_write( uint32_t address, uint8_t *data, uint32_t length, uint32_t fill)
   pageStartAddress = address;                 // Starting address for this page
   pageEndAddress   = ( address / 32 + 1 ) * 32 - 1;  // Ending address for this page
   
-
   while( bytesWritten < length )              // Main write loop
   {
     if( endAddress < pageEndAddress )         // If ending in the middle of a page, then
@@ -171,10 +194,11 @@ EE24_write( uint32_t address, uint8_t *data, uint32_t length, uint32_t fill)
   
     addHighByte  = (pageStartAddress >> 8) & 0x1F;  // Split 16-bit address into two 8-bit
     addLowByte   = pageStartAddress & 0xFF;         // addresses.
-    uint32_t writeLength = pageEndAddress - pageStartAddress + 3;
+    // writeLength is data for this frame plus write address
+    writeLength  = pageEndAddress - pageStartAddress + 3;
 
     I2C_setAddress( EE24_I2C, EE24_ADD );     // Set I2C address of EEPROM 
-    I2C_setNBytes( EE24_I2C, writeLength );      // Set number of bytes to write
+    I2C_setNBytes( EE24_I2C, writeLength );   // Set number of bytes to write
     I2C_start( EE24_I2C );                    // Send start bit
     I2C_write( EE24_I2C, addHighByte );       // Send high and low bytes of address
     I2C_write( EE24_I2C, addLowByte );        // to write to.
@@ -192,9 +216,8 @@ EE24_write( uint32_t address, uint8_t *data, uint32_t length, uint32_t fill)
         I2C_write( EE24_I2C, data[bytesWritten] );  // Write data[] for this page
         bytesWritten++;
       }
-
     I2C_stop( EE24_I2C );                     // End frame
-    delay_us( 15e3 );                          // Pause to allow for write to complete
+    delay_us( 15e3 );                         // Pause to allow for write to complete
     pageStartAddress = pageEndAddress + 1;    // Set next page start and end addresses
     pageEndAddress = pageStartAddress + 31;
   }                                           // End of main write loop
